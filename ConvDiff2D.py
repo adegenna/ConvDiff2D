@@ -13,7 +13,7 @@ class ConvDiff2D:
         self.NY = NY;
         self.NT = NT;
         self.u  = 1.0;
-        self.v  = 1.0;
+        self.v  = 0.5;
         self.mu = 1.0e-3;
         self.grid();
 

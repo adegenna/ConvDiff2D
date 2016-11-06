@@ -1,1 +1,8 @@
 2D Convection Diffusion PDE solver
+
+Solves the linear 2D convection/diffusion PDE given by:
+s_t + \dot(U , grad(s)) = mu*\nabla(s) + J(X,t)
+
+Here, J(X,t) = \sum_i J_i(t)*JX*JY
+where J_i(t) is a Gaussian random process and 
+JX,JY are set spatial fields
