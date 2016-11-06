@@ -23,17 +23,45 @@ class ConvDiff2D:
         Xtmp       = np.linspace(0,1,self.NX);
         Ytmp       = np.linspace(0,1,self.NY);
         XX,YY      = np.meshgrid(Xtmp,Ytmp);
-        X          = np.reshape(XX,self.NX*self.NY);
-        Y          = np.reshape(YY,self.NX*self.NY);
+        self.X     = np.reshape(XX,self.NX*self.NY);
+        self.Y     = np.reshape(YY,self.NX*self.NY);
         sig        = 0.2;
-        self.U     = np.exp(-0.5*np.sqrt((X-0.25)**2+(Y-0.25)**2)/(sig**2)) \
-                     + np.exp(-0.5*np.sqrt((X-0.75)**2+(Y-0.75)**2)/(sig**2))
+        # self.U     = np.exp(-0.5*np.sqrt((self.X-0.25)**2+(self.Y-0.25)**2)/(sig**2)) \
+        #              + np.exp(-0.5*np.sqrt((self.X-0.75)**2+(self.Y-0.75)**2)/(sig**2))
         self.dx    = 1.0/(self.NX-1);
         self.dy    = 1.0/(self.NY-1);
-        self.dt    = 1.0/(self.NT-1);
+        self.dt    = 3.0/(self.NT-1);
+        self.T     = np.linspace(0,3.0,self.NT);
 
+    # Gaussian process for injection profile
+    def initializeInjectors(self):
+        MEAN          = 2.0;
+        COV           = np.zeros([self.NT,self.NT]);
+        L             = 0.1;
+        self.numInj   = 5;
+        self.centersX = np.array([0.2, 0.2, 0.2, 0.2, 0.2]);
+        self.centersY = np.array([0.1, 0.3, 0.5, 0.7, 0.9]);
+        for i in range(0,self.NT):
+            COV[i] = (1.0**2)*np.exp(-0.5*((self.T[i]-self.T)**2)/(L**2));
+        lam,phi = np.linalg.eig(COV);
+        self.Ji    = MEAN + np.zeros([self.numInj,self.NT])
+        for i in range(0,self.numInj):
+            for j in range(0,self.NT):
+                self.Ji[i] += np.sqrt(lam[j])*phi[:,j]*np.random.normal();
+
+    # Generate injection profile
+    def generateInjection(self,timestep):
+        sigX = 0.05;
+        sigY = 0.05;
+        J    = np.zeros([self.NX*self.NY]);
+        for i in range(0,self.numInj):
+            JX = np.exp(-0.5*((self.X-self.centersX[i])**2)/(sigX**2));
+            JY = np.exp(-0.5*((self.Y-self.centersY[i])**2)/(sigY**2));
+            J += self.Ji[i,timestep]*JX*JY;
+        return J;
+            
     # ADI routine
-    def ADI(self):
+    def ADI(self,timestep):
         # First half step (derivatives in x)
         D2row   = np.diag(-2*np.ones(self.NX)) \
                  + np.diag(1*np.ones(self.NX-1),1) \
@@ -69,7 +97,8 @@ class ConvDiff2D:
         for j in range(0,self.NY):
             D2YU_xmajor[j*self.NX:(j+1)*self.NX] = \
                 D2YU[j:self.NX*self.NY:self.NY];
-        RHS = (2./self.dt)*self.U + D2YU_xmajor;
+        J_xmajor = self.generateInjection(timestep);
+        RHS      = (2./self.dt)*self.U + D2YU_xmajor + 0.5*J_xmajor;
         U_half = np.linalg.solve(LHS,RHS);
         # Second half step (derivatives in y)
         LHS = (2./self.dt)*np.identity(self.NX*self.NY) - D2Y + D1Y;
@@ -79,10 +108,13 @@ class ConvDiff2D:
                 U_half[j:self.NX*self.NY:self.NX];
         D2XU = np.dot(D2X,U_half);
         D2XU_ymajor = np.zeros(self.NX*self.NY);
+        J_ymajor    = np.zeros(self.NX*self.NY);
         for j in range(0,self.NX):
             D2XU_ymajor[j*self.NY:(j+1)*self.NY] = \
                 D2XU[j:self.NX*self.NY:self.NX];
-        RHS = (2./self.dt)*Uprev_Ymajor + D2XU_ymajor;
+            J_ymajor[j*self.NY:(j+1)*self.NY] = \
+                J_xmajor[j:self.NX*self.NY:self.NX];
+        RHS = (2./self.dt)*Uprev_Ymajor + D2XU_ymajor + 0.5*J_ymajor;
         U_new = np.linalg.solve(LHS,RHS);
         U_new_xmajor = np.zeros(self.NX*self.NY);
         for j in range(0,self.NY):
@@ -92,8 +124,9 @@ class ConvDiff2D:
         
     # Main solve routine
     def solve(self):
+        self.initializeInjectors();
         for i in range(0,self.NT):
             print i
-            self.ADI();
+            self.ADI(i);
             filename = "SOLN" + str(i) + '.out';
             np.save(filename,self.U);
